@@ -1,5 +1,5 @@
-"""Certificate Maker - apna certificate upload karo, Excel ke naam uspar likho.
-Run:  streamlit run app.py
+"""Certificate Maker - apna certificate upload karo, Excel ke naam aur logo uspar lagao.
+Run:  streamlit run certificate_app.py
 """
 import io
 import re
@@ -99,8 +99,21 @@ def put_text(img, text, x_pct, y_pct, size_pct, color, font_bytes):
     d.text((w * x_pct / 100, h * y_pct / 100), text, font=f, fill=color, anchor="mm")
 
 
+def put_logo(img, logo_bytes, x_pct, y_pct, w_pct):
+    """Logo ko (x%, y%) par beech me lagata hai. w_pct = certificate ki chaudai ka %.
+    Transparent PNG ho to peeche ka design dikhta rehta hai."""
+    logo = Image.open(io.BytesIO(logo_bytes)).convert("RGBA")
+    W, H = img.size
+    nw = max(int(W * w_pct / 100), 10)
+    nh = max(int(logo.height * nw / logo.width), 10)
+    logo = logo.resize((nw, nh), Image.LANCZOS)
+    img.paste(logo, (int(W * x_pct / 100 - nw / 2), int(H * y_pct / 100 - nh / 2)), logo)
+
+
 def make_certificate(template, row, cfg):
     img = template.copy()
+    for lb, lx, ly, lw in cfg.get("logos", ()):
+        put_logo(img, lb, lx, ly, lw)
     put_text(img, str(row["Name"]).strip(), cfg["nx"], cfg["ny"], cfg["ns"], cfg["nc"], cfg["font"])
     extra = fill(cfg["extra"], row).strip()
     if extra:
@@ -165,11 +178,13 @@ def step(n, text):
 
 
 left, right = st.columns([1, 1.5], gap="large")
+logos = []
 with left:
     with st.container(border=True):
         step(1, "Certificate chuno")
         style = st.selectbox("Taiyaar design", list(DESIGNS))
-        tpl = st.file_uploader("Ya apna certificate upload karo (PNG / JPG)", type=["png", "jpg", "jpeg"])
+        tpl = st.file_uploader("Ya apna certificate upload karo (PNG / JPG)", type=["png", "jpg", "jpeg"],
+                               help="Apna prarup naam ke bina (khali) upload karo, warna purana naam dikhega.")
     with st.container(border=True):
         step(2, "Naam wali Excel")
         up = st.file_uploader("Excel / CSV, pehla column header 'Name'", type=["xlsx", "xls", "csv"])
@@ -187,9 +202,22 @@ with left:
             es = st.slider("Extra: size", 1.0, 10.0, 3.5, 0.5)
             ec = st.color_picker("Extra: colour", "#333333")
         font_file = st.file_uploader("Apna font (.ttf), Hindi naam ke liye", type=["ttf", "otf"])
+    with st.container(border=True):
+        step(4, "Logo lagao (optional)")
+        st.caption("3 tak logo laga sakte ho. Transparent PNG sabse accha dikhta hai.")
+        defaults = [(10, 12), (90, 12), (50, 88)]
+        for k in range(3):
+            with st.expander(f"Logo {k + 1}", expanded=(k == 0)):
+                lf = st.file_uploader(f"Logo {k + 1} (PNG / JPG)", type=["png", "jpg", "jpeg"], key=f"logo_file_{k}")
+                lx = st.slider("Left - Right", 0, 100, defaults[k][0], key=f"logo_x_{k}")
+                ly = st.slider("Upar - Neeche", 0, 100, defaults[k][1], key=f"logo_y_{k}")
+                lw = st.slider("Logo ka size", 3, 40, 12, key=f"logo_w_{k}",
+                               help="Certificate ki chaudai ka kitna hissa")
+                if lf:
+                    logos.append((lf.getvalue(), lx, ly, lw))
 
 cfg = dict(nx=nx, ny=ny, ns=ns, nc=nc, extra=extra, ex=ex, ey=ey, es=es, ec=ec,
-           font=font_file.getvalue() if font_file else None)
+           font=font_file.getvalue() if font_file else None, logos=tuple(logos))
 
 if tpl:
     template = Image.open(io.BytesIO(tpl.getvalue())).convert("RGB")
@@ -208,7 +236,7 @@ if up:
 
 with right:
     with st.container(border=True):
-        step(4, "Preview aur download")
+        step(5, "Preview aur download")
         if df is not None and len(df):
             st.success(f"{len(df)} naam mile")
             i = st.number_input("Kaun sa certificate dekhna hai", 1, len(df), 1) - 1
