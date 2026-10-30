@@ -193,13 +193,13 @@ with left:
         step(3, "Naam ki jagah set karo")
         nx = st.slider("Left - Right", 0, 100, 50, help="0 = sabse left, 100 = sabse right")
         ny = st.slider("Upar - Neeche", 0, 100, 50, help="0 = sabse upar, 100 = sabse neeche")
-        ns = st.slider("Naam ka size", 2.0, 20.0, 8.0, 0.5)
+        ns = st.number_input("Naam ka size (+ / - dabao)", 2.0, 20.0, 8.0, 0.5)
         nc = st.color_picker("Naam ka colour", "#111111")
         with st.expander("Extra text (course, date) - optional"):
             extra = st.text_input("Text ({Course} jaise Excel column use kar sakte ho)", "")
             ex = st.slider("Extra: Left - Right", 0, 100, 50)
             ey = st.slider("Extra: Upar - Neeche", 0, 100, 74)
-            es = st.slider("Extra: size", 1.0, 10.0, 3.5, 0.5)
+            es = st.number_input("Extra: size (+ / - dabao)", 1.0, 10.0, 3.5, 0.5)
             ec = st.color_picker("Extra: colour", "#333333")
         font_file = st.file_uploader("Apna font (.ttf), Hindi naam ke liye", type=["ttf", "otf"])
     with st.container(border=True):
@@ -211,8 +211,8 @@ with left:
                 lf = st.file_uploader(f"Logo {k + 1} (PNG / JPG)", type=["png", "jpg", "jpeg"], key=f"logo_file_{k}")
                 lx = st.slider("Left - Right", 0, 100, defaults[k][0], key=f"logo_x_{k}")
                 ly = st.slider("Upar - Neeche", 0, 100, defaults[k][1], key=f"logo_y_{k}")
-                lw = st.slider("Logo ka size", 3, 40, 12, key=f"logo_w_{k}",
-                               help="Certificate ki chaudai ka kitna hissa")
+                lw = st.number_input("Logo ka size (+ / - dabao)", 3, 40, 12, 1, key=f"logo_w_{k}",
+                                     help="Certificate ki chaudai ka kitna hissa")
                 if lf:
                     logos.append((lf.getvalue(), lx, ly, lw))
 
