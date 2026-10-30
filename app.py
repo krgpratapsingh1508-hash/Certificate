@@ -1,37 +1,25 @@
-"""Certificate Maker - ek hi file. Run:  streamlit run app.py"""
+"""Certificate Maker - apna certificate upload karo, Excel ke naam uspar likho.
+Run:  streamlit run app.py
+"""
 import io
 import re
 import zipfile
-from datetime import date
 
 import pandas as pd
 import streamlit as st
 from PIL import Image, ImageDraw, ImageFont
 
-W, H = 1600, 1131  # A4 landscape ratio
-
-DEFAULTS = dict(
-    org="Your Organisation",
-    title="Certificate of Achievement",
-    pre="This certificate is proudly presented to",
-    body="for successfully completing the {Course} programme with dedication and excellence.",
-    date=date.today().strftime("%d %B %Y"),
-    signer="Authorised Signatory",
-    role="Director",
-    main="#1f5f5b",
-    accent="#b8892b",
-)
-
-# Put your own .ttf files in a "fonts" folder to override (e.g. fonts/regular.ttf)
-FONT_CANDIDATES = {
-    "regular": ["fonts/regular.ttf", "Georgia.ttf", "DejaVuSerif.ttf", "LiberationSerif-Regular.ttf", "times.ttf"],
-    "bold": ["fonts/bold.ttf", "Georgia Bold.ttf", "DejaVuSerif-Bold.ttf", "LiberationSerif-Bold.ttf", "timesbd.ttf"],
-    "italic": ["fonts/italic.ttf", "Georgia Italic.ttf", "DejaVuSerif-Italic.ttf", "LiberationSerif-Italic.ttf", "timesi.ttf"],
-}
+FONTS = ["DejaVuSerif-Bold.ttf", "DejaVuSerif.ttf", "LiberationSerif-Bold.ttf", "Georgia Bold.ttf", "timesbd.ttf"]
 
 
-def font(kind, size):
-    for name in FONT_CANDIDATES[kind]:
+def get_font(size, font_bytes=None):
+    size = max(int(size), 8)
+    if font_bytes:
+        try:
+            return ImageFont.truetype(io.BytesIO(font_bytes), size)
+        except OSError:
+            pass
+    for name in FONTS:
         try:
             return ImageFont.truetype(name, size)
         except OSError:
@@ -39,9 +27,19 @@ def font(kind, size):
     return ImageFont.load_default(size)
 
 
+def default_template():
+    """Jab tak apna certificate upload nahi hota, ye plain design dikhta hai."""
+    img = Image.new("RGB", (1600, 1131), "#fffdf7")
+    d = ImageDraw.Draw(img)
+    d.rectangle([40, 40, 1560, 1091], outline="#1f5f5b", width=16)
+    d.rectangle([75, 75, 1525, 1056], outline="#b8892b", width=4)
+    d.text((800, 260), "Certificate of Achievement", font=get_font(80), fill="#1f5f5b", anchor="mm")
+    d.text((800, 400), "Yahan apna certificate upload karo", font=get_font(36), fill="#777777", anchor="mm")
+    return img
+
+
 def read_names(file):
-    """Read .xlsx/.xls/.csv (path or uploaded file). Needs a 'Name' column."""
-    name = getattr(file, "name", str(file)).lower()
+    name = getattr(file, "name", "").lower()
     df = pd.read_csv(file) if name.endswith(".csv") else pd.read_excel(file)
     df.columns = [str(c).strip() for c in df.columns]
     col = next((c for c in df.columns if c.lower() == "name"), None)
@@ -50,8 +48,7 @@ def read_names(file):
     if col != "Name":
         df = df.rename(columns={col: "Name"})
     df = df.fillna("")
-    df = df[df["Name"].astype(str).str.strip() != ""]
-    return df.reset_index(drop=True)
+    return df[df["Name"].astype(str).str.strip() != ""].reset_index(drop=True)
 
 
 def fill(text, row):
@@ -59,57 +56,24 @@ def fill(text, row):
     return re.sub(r"\{([^}]+)\}", lambda m: str(lower.get(m.group(1).strip().lower(), "")), text)
 
 
-def wrap(draw, text, fnt, max_w):
-    lines, cur = [], ""
-    for word in text.split():
-        t = f"{cur} {word}".strip()
-        if draw.textlength(t, font=fnt) > max_w and cur:
-            lines.append(cur)
-            cur = word
-        else:
-            cur = t
-    return lines + ([cur] if cur else [])
-
-
-def make_certificate(row, **opts):
-    o = {**DEFAULTS, **opts}
-    img = Image.new("RGB", (W, H), "#fffdf7")
+def put_text(img, text, x_pct, y_pct, size_pct, color, font_bytes):
+    """Text ko (x%, y%) par beech me likhta hai. Lamba ho to khud chhota ho jata hai."""
+    w, h = img.size
     d = ImageDraw.Draw(img)
-    cx = W // 2
+    size = size_pct / 100 * h
+    f = get_font(size, font_bytes)
+    while d.textlength(text, font=f) > w * 0.9 and size > 12:
+        size -= 4
+        f = get_font(size, font_bytes)
+    d.text((w * x_pct / 100, h * y_pct / 100), text, font=f, fill=color, anchor="mm")
 
-    d.rectangle([40, 40, W - 40, H - 40], outline=o["main"], width=18)
-    d.rectangle([75, 75, W - 75, H - 75], outline=o["accent"], width=4)
 
-    d.text((cx, 185), o["org"].upper(), font=font("bold", 30), fill=o["accent"], anchor="ms")
-    d.text((cx, 300), o["title"], font=font("bold", 80), fill=o["main"], anchor="ms")
-    d.line([cx - 140, 335, cx + 140, 335], fill=o["accent"], width=3)
-    d.text((cx, 420), o["pre"], font=font("italic", 32), fill="#444444", anchor="ms")
-
-    # Name (auto-shrinks if long)
-    name, size = str(row["Name"]).strip(), 100
-    f = font("italic", size)
-    while d.textlength(name, font=f) > W - 300 and size > 40:
-        size -= 6
-        f = font("italic", size)
-    d.text((cx, 550), name, font=f, fill="#111111", anchor="ms")
-    d.line([cx - 380, 580, cx + 380, 580], fill="#999999", width=2)
-
-    bf = font("regular", 34)
-    for i, line in enumerate(wrap(d, fill(o["body"], row), bf, W - 420)[:4]):
-        d.text((cx, 670 + i * 50), line, font=bf, fill="#333333", anchor="ms")
-
-    # Date + signer
-    d.line([180, 930, 500, 930], fill="#666666", width=2)
-    d.text((340, 917), o["date"], font=font("regular", 28), fill="#333333", anchor="ms")
-    d.text((340, 968), "Date", font=font("regular", 24), fill="#333333", anchor="ms")
-    d.line([W - 500, 930, W - 180, 930], fill="#666666", width=2)
-    d.text((W - 340, 965), o["signer"], font=font("bold", 28), fill="#333333", anchor="ms")
-    d.text((W - 340, 998), o["role"], font=font("regular", 24), fill="#333333", anchor="ms")
-
-    # Seal
-    d.ellipse([cx - 62, 873, cx + 62, 997], fill=o["accent"])
-    d.ellipse([cx - 50, 885, cx + 50, 985], outline="#fffdf7", width=3)
-    d.text((cx, 935), "CERTIFIED", font=font("bold", 15), fill="#fffdf7", anchor="mm")
+def make_certificate(template, row, cfg):
+    img = template.copy()
+    put_text(img, str(row["Name"]).strip(), cfg["nx"], cfg["ny"], cfg["ns"], cfg["nc"], cfg["font"])
+    extra = fill(cfg["extra"], row).strip()
+    if extra:
+        put_text(img, extra, cfg["ex"], cfg["ey"], cfg["es"], cfg["ec"], cfg["font"])
     return img
 
 
@@ -117,9 +81,10 @@ def safe(s):
     return re.sub(r"[^\w\- ]+", "", str(s)).strip()[:60] or "certificate"
 
 
-def build_all(df, **opts):
-    """Returns (pdf_bytes, zip_bytes) for every row in df."""
-    imgs = [make_certificate(r, **opts) for r in df.to_dict("records")]
+@st.cache_data(show_spinner="Certificates ban rahe hain...")
+def build_all(template_bytes, df, cfg):
+    template = Image.open(io.BytesIO(template_bytes)).convert("RGB")
+    imgs = [make_certificate(template, r, cfg) for r in df.to_dict("records")]
     pdf = io.BytesIO()
     imgs[0].save(pdf, format="PDF", save_all=True, append_images=imgs[1:], resolution=150)
     zbuf = io.BytesIO()
@@ -131,37 +96,50 @@ def build_all(df, **opts):
     return pdf.getvalue(), zbuf.getvalue()
 
 
-def sample_excel_bytes():
+def sample_excel():
     b = io.BytesIO()
     pd.DataFrame({"Name": ["Aarav Sharma", "Priya Verma", "Rohan Patel"],
                   "Course": ["Web Development", "Data Analysis", "Digital Marketing"]}).to_excel(b, index=False)
     return b.getvalue()
 
 
-@st.cache_data(show_spinner="Certificates ban rahe hain...")
-def cached_build(df, opts):
-    return build_all(df, **opts)
-
-
+# ---------------------------- Web page ----------------------------
 st.set_page_config(page_title="Certificate Maker", page_icon="🎓", layout="wide")
 st.title("Certificate Maker")
-st.caption("Excel upload karo, har naam ka certificate download karo.")
+st.caption("Apna certificate aur Excel upload karo. Har naam certificate par likh kar mil jayega.")
 
-left, right = st.columns([1, 1.6])
+left, right = st.columns([1, 1.5])
 with left:
-    up = st.file_uploader("Excel / CSV (Name column zaroori)", type=["xlsx", "xls", "csv"])
-    st.download_button("Sample Excel download karo", sample_excel_bytes(), "sample-names.xlsx")
-    opts = dict(
-        org=st.text_input("Organisation", DEFAULTS["org"]),
-        title=st.text_input("Title", DEFAULTS["title"]),
-        pre=st.text_input("Naam ke upar ka text", DEFAULTS["pre"]),
-        body=st.text_area("Naam ke neeche ka text ({Column} use kar sakte ho)", DEFAULTS["body"]),
-        date=st.text_input("Date", DEFAULTS["date"]),
-        signer=st.text_input("Signer", DEFAULTS["signer"]),
-        role=st.text_input("Designation", DEFAULTS["role"]),
-        main=st.color_picker("Main colour", DEFAULTS["main"]),
-        accent=st.color_picker("Accent colour", DEFAULTS["accent"]),
-    )
+    tpl = st.file_uploader("1. Apna certificate (PNG / JPG)", type=["png", "jpg", "jpeg"])
+    up = st.file_uploader("2. Excel / CSV (Name column zaroori)", type=["xlsx", "xls", "csv"])
+    st.download_button("Sample Excel download karo", sample_excel(), "sample-names.xlsx")
+
+    st.subheader("3. Naam kahan likhna hai")
+    nx = st.slider("Left-Right", 0, 100, 50, help="0 = sabse left, 100 = sabse right")
+    ny = st.slider("Upar-Neeche", 0, 100, 50, help="0 = sabse upar, 100 = sabse neeche")
+    ns = st.slider("Naam ka size", 2.0, 20.0, 8.0, 0.5)
+    nc = st.color_picker("Naam ka colour", "#111111")
+
+    with st.expander("Extra text (jaise course ya date) - optional"):
+        extra = st.text_input("Text ({Course} jaise Excel column use kar sakte ho)", "")
+        ex = st.slider("Extra: Left-Right", 0, 100, 50)
+        ey = st.slider("Extra: Upar-Neeche", 0, 100, 62)
+        es = st.slider("Extra: size", 1.0, 10.0, 3.5, 0.5)
+        ec = st.color_picker("Extra: colour", "#333333")
+
+    font_file = st.file_uploader("Apna font (.ttf) - optional, Hindi naam ke liye zaroori", type=["ttf", "otf"])
+
+cfg = dict(nx=nx, ny=ny, ns=ns, nc=nc, extra=extra, ex=ex, ey=ey, es=es, ec=ec,
+           font=font_file.getvalue() if font_file else None)
+
+if tpl:
+    tpl_bytes = tpl.getvalue()
+    template = Image.open(io.BytesIO(tpl_bytes)).convert("RGB")
+else:
+    template = default_template()
+    buf = io.BytesIO()
+    template.save(buf, format="PNG")
+    tpl_bytes = buf.getvalue()
 
 df = None
 if up:
@@ -174,11 +152,11 @@ with right:
     if df is not None and len(df):
         st.success(f"{len(df)} naam mile")
         i = st.number_input("Preview number", 1, len(df), 1) - 1
-        st.image(make_certificate(df.iloc[i].to_dict(), **opts), use_container_width=True)
-        pdf, zp = cached_build(df, opts)
+        st.image(make_certificate(template, df.iloc[i].to_dict(), cfg), use_container_width=True)
+        pdf, zp = build_all(tpl_bytes, df, cfg)
         st.download_button("PDF download (sab ek file me)", pdf, "certificates.pdf", "application/pdf")
         st.download_button("ZIP download (PNG images)", zp, "certificates.zip", "application/zip")
     else:
-        st.info("Preview ke liye pehle Excel upload karo.")
-        st.image(make_certificate({"Name": "Aarav Sharma", "Course": "Web Development"}, **opts),
+        st.info("Preview dekhne ke liye Excel upload karo. Neeche sample naam se dikh raha hai.")
+        st.image(make_certificate(template, {"Name": "Aarav Sharma", "Course": "Web Development"}, cfg),
                  use_container_width=True)
